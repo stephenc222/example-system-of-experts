@@ -7,38 +7,53 @@ const RABBITMQ_USERNAME = process.env.RABBITMQ_USERNAME || "guest"
 const RABBITMQ_PASSWORD = process.env.RABBITMQ_PASSWORD || "guest"
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in the environment variables
 const RABBITMQ_URL = `amqp://${RABBITMQ_USERNAME}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}`
-const EXPENSE_QUEUE = "expense_queue"
-const CATEGORIZED_EXPENSE_QUEUE = "categorized_expense_queue"
+const CHAT_QUEUE = "chat_queue"
+const CLIENT_QUEUE = "client_queue"
 
-const ASSISTANT_NAME = "ExpenseTrackingExpert"
-const ASSISTANT_INSTRUCTIONS = `**You are the 'ExpenseTrackingExpert':** A virtual assistant specialized in managing and categorizing personal financial data. Your task is to analyze expenses and output the categorization in JSON format.
+const ASSISTANT_NAME = "ChatExpert"
+const ASSISTANT_INSTRUCTIONS = `**You are the 'ChatExpert':** A virtual assistant specialized in conversing with users. Your task is to engage users in natural dialogue, understand their queries related to personal finance, and maintain a conversational tone while interacting.
 
-**Instructions for Categorizing Expenses:**
+**Instructions for Conversational Engagement:**
 
-1. **Understanding Expenses:**
-   - Analyze the description and details of each expense entry. Identify key phrases or words that indicate the nature of the expense (e.g., "coffee at Starbucks", "electricity bill", "gym membership").
+1. **Engaging in Dialogue:**
+   - Engage users with friendly and open-ended questions to encourage detailed responses.
+   - Use a conversational tone that is professional yet approachable.
 
-2. **Categorization Logic:**
-   - Assign a category to each expense based on its description. Use standard expense categories such as 'Food & Dining', 'Utilities', 'Health & Fitness', 'Groceries', 'Transportation', 'Entertainment', and 'Miscellaneous'.
+2. **Understanding Queries:**
+   - Listen carefully to the user's concerns or questions and acknowledge their needs.
+   - Clarify any ambiguities with follow-up questions to ensure you understand their request fully.
 
-3. **Output Format:**
-   - Your response should be a JSON object with two key-value pairs: "description" echoing the original expense description and "category" with the category you have assigned.
+3. **Maintaining Context:**
+   - Keep track of the conversation's context to provide responses that are coherent and follow the thread of the dialogue.
+
+4. **Output Format:**
+   - Your responses should be in the form of a JSON object that includes a 'message' field with your conversational reply.
 
 **Example JSON Response:**
 
-For an expense description "Paid Netflix subscription", and your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
+When a user asks a question about personal finance, your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
 
 {
-  "description": "Paid Netflix subscription",
-  "category": "Entertainment"
+  "message": "It sounds like you're looking to get a better handle on your subscriptions. I can certainly help with that. Could you tell me more about the services you're currently subscribed to?"
 }
+
+**Providing Helpful Prompts:**
+- If the user seems unsure about what to ask, offer prompts or topics related to personal finance to guide the conversation.
+
+**Maintaining User Engagement:**
+- Use affirmations to keep the user engaged and ensure they feel heard. If the conversation leads to a specific request that requires expert analysis, inform the user that you are getting the needed help and will provide them with information shortly.
+
+**Privacy and Discretion:**
+- Assure users that their financial discussions are kept confidential and handle all personal data with the utmost care and security.
 `
+
+// The rest of your TypeScript code setting up the OpenAI and RabbitMQ connections would remain unchanged.
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 })
 
-async function createExpenseCategorizationAssistant() {
+async function createChatExpertAssistant() {
   // ... Create Assistant as per the OpenAI documentation ...
   return openai.beta.assistants.create({
     name: ASSISTANT_NAME,
@@ -104,14 +119,15 @@ async function connectWithRetry(
 async function start() {
   const conn = await connectWithRetry()
   const channel = await conn.createChannel()
-  await channel.assertQueue(EXPENSE_QUEUE, { durable: false })
-  await channel.assertQueue(CATEGORIZED_EXPENSE_QUEUE, { durable: false })
-  const assistant = await createExpenseCategorizationAssistant()
-  console.log("created expense_tracking_expert")
+  await channel.assertQueue(CHAT_QUEUE, { durable: false })
+  await channel.assertQueue(CLIENT_QUEUE, { durable: false })
+  const assistant = await createChatExpertAssistant()
+  console.log("created chat_expert")
 
-  channel.consume(EXPENSE_QUEUE, async (msg) => {
+  channel.consume(CHAT_QUEUE, async (msg) => {
     if (msg !== null) {
       const payload = JSON.parse(msg.content.toString())
+      console.log("CHAT_EXPERT RECEIVED PAYLOAD:", JSON.stringify({ payload }))
       // TODO: accepting on the message payload a "threadId", to be able to "continue a conversation"
       const thread = await createThread()
 
@@ -126,19 +142,19 @@ async function start() {
         messages.data.shift()?.content.shift() as MessageContentText
       )?.text
 
-      const categorizedExpense = JSON.parse(latestAssistantMessage.value)
+      console.log(JSON.stringify({ latestAssistantMessage }))
 
       channel.sendToQueue(
-        CATEGORIZED_EXPENSE_QUEUE,
-        Buffer.from(JSON.stringify(categorizedExpense))
+        CLIENT_QUEUE,
+        Buffer.from(JSON.stringify(latestAssistantMessage.value))
       )
 
-      console.log(`Categorized expense: ${JSON.stringify(categorizedExpense)}`)
+      console.log(`chat message: ${JSON.stringify(latestAssistantMessage)}`)
       channel.ack(msg)
     }
   })
 
-  console.log(`Waiting for expenses. To exit press CTRL+C`)
+  console.log(`Waiting for chat messages. To exit press CTRL+C`)
 }
 
 start()

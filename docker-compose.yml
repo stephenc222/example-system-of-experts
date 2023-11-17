@@ -13,6 +13,40 @@ services:
     labels:
       NAME: "rabbitmq"
 
+  client_api:
+    build: ./client_api
+    environment:
+      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    depends_on:
+      - rabbitmq
+    labels:
+      NAME: "client_api"
+    ports:
+      - "3000:3000"
+  chat_expert:
+    build: ./chat_expert
+    environment:
+      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    depends_on:
+      - rabbitmq
+    labels:
+      NAME: "chat_expert"
+  manager_expert:
+    build: ./manager_expert
+    environment:
+      RABBITMQ_HOST: ${RABBITMQ_HOST}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    depends_on:
+      - rabbitmq
+    labels:
+      NAME: "manager_expert"
   expense_tracking_expert:
     build: ./expense_tracking_expert
     environment:

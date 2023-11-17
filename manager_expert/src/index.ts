@@ -8,37 +8,51 @@ const RABBITMQ_PASSWORD = process.env.RABBITMQ_PASSWORD || "guest"
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in the environment variables
 const RABBITMQ_URL = `amqp://${RABBITMQ_USERNAME}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}`
 const EXPENSE_QUEUE = "expense_queue"
-const CATEGORIZED_EXPENSE_QUEUE = "categorized_expense_queue"
+const MANAGER_QUEUE = "manager_queue"
+const CHAT_QUEUE = "chat_queue" // Queue for publishing savings advice
 
-const ASSISTANT_NAME = "ExpenseTrackingExpert"
-const ASSISTANT_INSTRUCTIONS = `**You are the 'ExpenseTrackingExpert':** A virtual assistant specialized in managing and categorizing personal financial data. Your task is to analyze expenses and output the categorization in JSON format.
+const ASSISTANT_NAME = "ManagerExpert"
+const ASSISTANT_INSTRUCTIONS = `**You are the 'ManagerExpert':** A virtual assistant responsible for analyzing incoming messages and routing them to the appropriate expert queue based on the identified intent of the message.
 
-**Instructions for Categorizing Expenses:**
+**Instructions for Message Routing:**
 
-1. **Understanding Expenses:**
-   - Analyze the description and details of each expense entry. Identify key phrases or words that indicate the nature of the expense (e.g., "coffee at Starbucks", "electricity bill", "gym membership").
+1. **Intent Analysis:**
+   - Examine the content of each incoming message to determine the user's intent.
+   - Identify keywords or phrases that indicate which expert should handle the request.
 
-2. **Categorization Logic:**
-   - Assign a category to each expense based on its description. Use standard expense categories such as 'Food & Dining', 'Utilities', 'Health & Fitness', 'Groceries', 'Transportation', 'Entertainment', and 'Miscellaneous'.
+2. **Routing Decision:**
+   - Decide which queue the message should be forwarded to based on the analysis.
+   - The queues are 'chat_queue' for general conversation and 'expense_queue' for financial-related queries.
 
-3. **Output Format:**
-   - Your response should be a JSON object with two key-value pairs: "description" echoing the original expense description and "category" with the category you have assigned.
+3. **Message Forwarding:**
+   - Forward the message as a JSON object. Include the 'message' field containing the original message and the 'queue' field indicating the target queue.
 
-**Example JSON Response:**
+**Example JSON Message Forwarding:**
 
-For an expense description "Paid Netflix subscription", and your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
+When you receive a user message and determine it should go to the 'expense_queue', and your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
 
 {
-  "description": "Paid Netflix subscription",
-  "category": "Entertainment"
+  "message": "I spent $100 on groceries last night.",
+  "queue": "expense_queue"
 }
+
+**Efficiency and Timeliness:**
+- Ensure messages are routed promptly to keep user wait times to a minimum.
+
+**Fallback Strategy:**
+- If the intent is not clear from the message, either ask for clarification or default to a queue designed for handling ambiguous queries.
+
+**Maintain User Trust:**
+- Communicate to users that their messages are being processed and will be attended to shortly.
 `
+
+// The rest of your TypeScript code setting up the OpenAI and RabbitMQ connections would remain unchanged.
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 })
 
-async function createExpenseCategorizationAssistant() {
+async function createSavingsExpertAssistant() {
   // ... Create Assistant as per the OpenAI documentation ...
   return openai.beta.assistants.create({
     name: ASSISTANT_NAME,
@@ -104,41 +118,49 @@ async function connectWithRetry(
 async function start() {
   const conn = await connectWithRetry()
   const channel = await conn.createChannel()
+  await channel.assertQueue(MANAGER_QUEUE, { durable: false })
   await channel.assertQueue(EXPENSE_QUEUE, { durable: false })
-  await channel.assertQueue(CATEGORIZED_EXPENSE_QUEUE, { durable: false })
-  const assistant = await createExpenseCategorizationAssistant()
-  console.log("created expense_tracking_expert")
+  await channel.assertQueue(CHAT_QUEUE, { durable: false })
+  const assistant = await createSavingsExpertAssistant()
+  console.log("created manager_expert")
 
-  channel.consume(EXPENSE_QUEUE, async (msg) => {
+  channel.consume(MANAGER_QUEUE, async (msg) => {
     if (msg !== null) {
       const payload = JSON.parse(msg.content.toString())
       // TODO: accepting on the message payload a "threadId", to be able to "continue a conversation"
       const thread = await createThread()
 
-      await addMessageToThread(thread.id, payload.message)
+      console.log("RECEIVED:", JSON.stringify({ payload }))
+
+      await addMessageToThread(thread.id, payload)
       const run = await runAssistant(thread.id, assistant.id)
 
       console.log("finished run:", JSON.stringify({ run: run.status }))
 
       const messages = await getAssistantMessages(thread.id)
 
-      const latestAssistantMessage = (
-        messages.data.shift()?.content.shift() as MessageContentText
-      )?.text
-
-      const categorizedExpense = JSON.parse(latestAssistantMessage.value)
-
-      channel.sendToQueue(
-        CATEGORIZED_EXPENSE_QUEUE,
-        Buffer.from(JSON.stringify(categorizedExpense))
+      const latestAssistantMessage = JSON.parse(
+        (messages.data.shift()?.content.shift() as MessageContentText)?.text
+          .value
       )
 
-      console.log(`Categorized expense: ${JSON.stringify(categorizedExpense)}`)
+      console.log("MANAGER_EXPERT:", JSON.stringify({ latestAssistantMessage }))
+
+      channel.sendToQueue(
+        latestAssistantMessage.queue,
+        Buffer.from(JSON.stringify(latestAssistantMessage))
+      )
+
+      console.log(
+        `Provided expert manager decision: ${JSON.stringify(
+          latestAssistantMessage
+        )}`
+      )
       channel.ack(msg)
     }
   })
 
-  console.log(`Waiting for expenses. To exit press CTRL+C`)
+  console.log(`Waiting for client_api messages. To exit press CTRL+C`)
 }
 
 start()

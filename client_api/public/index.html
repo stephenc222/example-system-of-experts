@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Chat with AI Experts</title>
+    <style>
+      #messages {
+        border: 1px solid #ddd;
+        padding: 10px;
+        margin-bottom: 20px;
+        height: 300px;
+        overflow-y: scroll;
+      }
+      .message {
+        padding: 5px;
+        border-bottom: 1px solid #eee;
+      }
+      .sent {
+        color: blue;
+      }
+      .received {
+        color: green;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="messages"></div>
+    <form id="message-form">
+      <input
+        type="text"
+        id="message-box"
+        placeholder="Type a message..."
+        autocomplete="off"
+      />
+      <button type="submit">Send</button>
+    </form>
+
+    <script>
+      const messagesElement = document.getElementById("messages")
+      const socket = new WebSocket("ws://localhost:3000")
+
+      // Connection opened
+      socket.addEventListener("open", (event) => {
+        console.log("Connected to WebSocket server")
+      })
+
+      // Listen for messages from the server
+      socket.addEventListener("message", (event) => {
+        const data = JSON.parse(event.data)
+        const payload = JSON.parse(data)
+        displayMessage(payload.message, "received")
+      })
+
+      // Submit form to send a message
+      document
+        .getElementById("message-form")
+        .addEventListener("submit", (event) => {
+          event.preventDefault()
+          const messageBox = document.getElementById("message-box")
+          const message = messageBox.value
+          messageBox.value = "" // Clear the input field
+
+          displayMessage(message,  "sent")
+
+          // Send the message through the WebSocket
+          socket.send(JSON.stringify({ type: "message", content: message }))
+        })
+
+      // Display messages on the page
+      function displayMessage(message, className) {
+        const messageElement = document.createElement("div")
+        messageElement.classList.add("message", className)
+        messageElement.textContent = message
+        messagesElement.appendChild(messageElement)
+        messagesElement.scrollTop = messagesElement.scrollHeight // Auto scroll to the bottom
+      }
+
+      // Close the WebSocket connection when the window is closed
+      window.addEventListener("beforeunload", () => {
+        socket.close()
+      })
+    </script>
+  </body>
+</html>

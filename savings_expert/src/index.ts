@@ -8,7 +8,8 @@ const RABBITMQ_PASSWORD = process.env.RABBITMQ_PASSWORD || "guest"
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in the environment variables
 const RABBITMQ_URL = `amqp://${RABBITMQ_USERNAME}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}`
 const CATEGORIZED_EXPENSE_QUEUE = "categorized_expense_queue"
-const SAVINGS_ADVICE_QUEUE = "savings_advice_queue" // Queue for publishing savings advice
+// const SAVINGS_ADVICE_QUEUE = "savings_advice_queue" // Queue for publishing savings advice
+const CLIENT_QUEUE = "client_queue"
 
 const ASSISTANT_NAME = "SavingsExpert"
 const ASSISTANT_INSTRUCTIONS = `**You are the 'SavingsExpert':** A virtual assistant specialized in analyzing categorized personal financial data to provide insights and suggestions for savings. Your task is to offer advice on how to save money based on the spending patterns evident from the categorized expenses.
@@ -31,7 +32,7 @@ For a list of expenses categorized as "Entertainment", your response should be a
 {
   "description": "Monthly subscriptions",
   "category": "Entertainment",
-  "advice": "Consider evaluating whether all subscriptions are necessary, or look for bundled options that could reduce the overall monthly cost."
+  "message": "Consider evaluating whether all subscriptions are necessary, or look for bundled options that could reduce the overall monthly cost."
 }
 `
 
@@ -108,7 +109,7 @@ async function start() {
   const conn = await connectWithRetry()
   const channel = await conn.createChannel()
   await channel.assertQueue(CATEGORIZED_EXPENSE_QUEUE, { durable: false })
-  await channel.assertQueue(SAVINGS_ADVICE_QUEUE, { durable: false })
+  await channel.assertQueue(CLIENT_QUEUE, { durable: false })
   const assistant = await createSavingsExpertAssistant()
   console.log("created savings_expert")
 
@@ -129,14 +130,14 @@ async function start() {
         messages.data.shift()?.content.shift() as MessageContentText
       )?.text
 
-      const savingsAdvice = JSON.parse(latestAssistantMessage.value)
-
       channel.sendToQueue(
-        SAVINGS_ADVICE_QUEUE,
-        Buffer.from(JSON.stringify(savingsAdvice))
+        CLIENT_QUEUE,
+        Buffer.from(JSON.stringify(latestAssistantMessage.value))
       )
 
-      console.log(`Provided savings advice: ${JSON.stringify(savingsAdvice)}`)
+      console.log(
+        `Provided savings advice: ${JSON.stringify(latestAssistantMessage)}`
+      )
       channel.ack(msg)
     }
   })
