@@ -8,12 +8,13 @@ const RABBITMQ_PASSWORD = process.env.RABBITMQ_PASSWORD || "guest"
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in the environment variables
 const RABBITMQ_URL = `amqp://${RABBITMQ_USERNAME}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}`
 const CHAT_QUEUE = "chat_queue"
-const CLIENT_QUEUE = "client_queue"
+const MANAGER_QUEUE = "manager_queue"
+const CLIENT_QUEUE = "client_queue" // to send back to the user
 
 const ASSISTANT_NAME = "ChatExpert"
 const ASSISTANT_INSTRUCTIONS = `**You are the 'ChatExpert':** A virtual assistant specialized in conversing with users. Your task is to engage users in natural dialogue, understand their queries related to personal finance, and maintain a conversational tone while interacting.
 
-**Instructions for Conversational Engagement:**
+**Instructions for Conversational Engagement and Queue Routing:**
 
 1. **Engaging in Dialogue:**
    - Engage users with friendly and open-ended questions to encourage detailed responses.
@@ -27,24 +28,31 @@ const ASSISTANT_INSTRUCTIONS = `**You are the 'ChatExpert':** A virtual assistan
    - Keep track of the conversation's context to provide responses that are coherent and follow the thread of the dialogue.
 
 4. **Output Format:**
-   - Your responses should be in the form of a JSON object that includes a 'message' field with your conversational reply.
+   - Your responses should be in the form of a JSON object that includes a 'message' field with your conversational reply, and a 'queue' field indicating the appropriate RabbitMQ queue.
+   
+5. **Routing Logic:**
+   - Use 'client_queue' to send responses directly back to the user.
+   - Use 'manager_queue' if the conversation requires input from or notification to other services for further processing or expert analysis.
 
 **Example JSON Response:**
 
-When a user asks a question about personal finance, your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
+When a user asks a question about personal finance, your response routed to the 'client_queue' should be a raw JSON string formatted as follows:
 
 {
-  "message": "It sounds like you're looking to get a better handle on your subscriptions. I can certainly help with that. Could you tell me more about the services you're currently subscribed to?"
+  "message": "It sounds like you're looking to get a better handle on your subscriptions. I can certainly help with that. Could you tell me more about the services you're currently subscribed to?",
+  "queue": "client_queue"
 }
 
 **Providing Helpful Prompts:**
 - If the user seems unsure about what to ask, offer prompts or topics related to personal finance to guide the conversation.
 
 **Maintaining User Engagement:**
-- Use affirmations to keep the user engaged and ensure they feel heard. If the conversation leads to a specific request that requires expert analysis, inform the user that you are getting the needed help and will provide them with information shortly.
+- Use affirmations to keep the user engaged and ensure they feel heard. If the conversation leads to a specific request that requires expert analysis, inform the user that you are getting the needed help, and route the message through the 'chat_queue'.
 
 **Privacy and Discretion:**
 - Assure users that their financial discussions are kept confidential and handle all personal data with the utmost care and security.
+
+**Note:** The JSON response should be a raw string without markdown syntax (do not include "\`\`\`json" nor \`\`\`), ready for direct parsing as JSON.
 `
 
 // The rest of your TypeScript code setting up the OpenAI and RabbitMQ connections would remain unchanged.
@@ -65,17 +73,20 @@ async function createChatExpertAssistant() {
 
 async function createThread() {
   // ... Create a thread for a new conversation ...
-  return openai.beta.threads.create()
+  return (await openai.beta.threads.create()).id
 }
 
-async function addMessageToThread(threadId: string, content: string) {
+async function addMessageToThread(message: {
+  threadId: string
+  [key: string]: string | number
+}) {
   // ... Add a message to the thread ...
+  const { threadId, ...content } = message
   return openai.beta.threads.messages.create(threadId, {
     role: "user",
-    content,
+    content: JSON.stringify(content),
   })
 }
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -121,6 +132,7 @@ async function start() {
   const channel = await conn.createChannel()
   await channel.assertQueue(CHAT_QUEUE, { durable: false })
   await channel.assertQueue(CLIENT_QUEUE, { durable: false })
+  await channel.assertQueue(MANAGER_QUEUE, { durable: false })
   const assistant = await createChatExpertAssistant()
   console.log("created chat_expert")
 
@@ -129,24 +141,32 @@ async function start() {
       const payload = JSON.parse(msg.content.toString())
       console.log("CHAT_EXPERT RECEIVED PAYLOAD:", JSON.stringify({ payload }))
       // TODO: accepting on the message payload a "threadId", to be able to "continue a conversation"
-      const thread = await createThread()
+      if (!payload.threadId) {
+        payload.threadId = await createThread()
+      }
 
-      await addMessageToThread(thread.id, payload.message)
-      const run = await runAssistant(thread.id, assistant.id)
+      await addMessageToThread(payload)
+      const run = await runAssistant(payload.threadId, assistant.id)
 
       console.log("finished run:", JSON.stringify({ run: run.status }))
 
-      const messages = await getAssistantMessages(thread.id)
+      const messages = await getAssistantMessages(payload.threadId)
 
-      const latestAssistantMessage = (
-        messages.data.shift()?.content.shift() as MessageContentText
-      )?.text
+      const latestAssistantMessage = JSON.parse(
+        (messages.data.shift()?.content.shift() as MessageContentText)?.text
+          .value
+      )
 
       console.log(JSON.stringify({ latestAssistantMessage }))
 
       channel.sendToQueue(
-        CLIENT_QUEUE,
-        Buffer.from(JSON.stringify(latestAssistantMessage.value))
+        latestAssistantMessage.queue,
+        Buffer.from(
+          JSON.stringify({
+            ...latestAssistantMessage,
+            threadId: payload.threadId,
+          })
+        )
       )
 
       console.log(`chat message: ${JSON.stringify(latestAssistantMessage)}`)

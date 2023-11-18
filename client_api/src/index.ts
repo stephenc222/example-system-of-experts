@@ -42,7 +42,7 @@ wss.on("connection", async (ws) => {
     console.log("CLIENT API RECEIVED MESSAGE:", JSON.stringify({ payload }))
 
     // Forward the message to the manager queue
-    await sendMessageToQueue(MANAGER_QUEUE, payload.content)
+    await sendMessageToQueue(MANAGER_QUEUE, payload)
   })
   channel.consume(
     CLIENT_QUEUE,

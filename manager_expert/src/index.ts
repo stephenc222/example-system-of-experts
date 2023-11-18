@@ -22,7 +22,7 @@ const ASSISTANT_INSTRUCTIONS = `**You are the 'ManagerExpert':** A virtual assis
 
 2. **Routing Decision:**
    - Decide which queue the message should be forwarded to based on the analysis.
-   - The queues are 'chat_queue' for general conversation and 'expense_queue' for financial-related queries.
+   - The queues are 'chat_queue' to pass conversation content (i.e, "the user said": ) to the 'ChatExpert', and 'expense_queue' for financial-related queries.
 
 3. **Message Forwarding:**
    - Forward the message as a JSON object. Include the 'message' field containing the original message and the 'queue' field indicating the target queue.
@@ -34,6 +34,13 @@ When you receive a user message and determine it should go to the 'expense_queue
 {
   "message": "I spent $100 on groceries last night.",
   "queue": "expense_queue"
+}
+
+When you receive a user message and determine it should go to the 'chat_queue', and your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
+
+{
+  "message": "The user said: (What the user said exactly)",
+  "queue": "chat_queue"
 }
 
 **Efficiency and Timeliness:**
@@ -64,14 +71,18 @@ async function createSavingsExpertAssistant() {
 
 async function createThread() {
   // ... Create a thread for a new conversation ...
-  return openai.beta.threads.create()
+  return (await openai.beta.threads.create()).id
 }
 
-async function addMessageToThread(threadId: string, content: string) {
+async function addMessageToThread(message: {
+  threadId: string
+  [key: string]: string | number
+}) {
   // ... Add a message to the thread ...
+  const { threadId, ...content } = message
   return openai.beta.threads.messages.create(threadId, {
     role: "user",
-    content,
+    content: JSON.stringify(content),
   })
 }
 
@@ -128,16 +139,18 @@ async function start() {
     if (msg !== null) {
       const payload = JSON.parse(msg.content.toString())
       // TODO: accepting on the message payload a "threadId", to be able to "continue a conversation"
-      const thread = await createThread()
+      if (!payload.threadId) {
+        payload.threadId = await createThread()
+      }
 
       console.log("RECEIVED:", JSON.stringify({ payload }))
 
-      await addMessageToThread(thread.id, payload)
-      const run = await runAssistant(thread.id, assistant.id)
+      await addMessageToThread(payload)
+      const run = await runAssistant(payload.threadId, assistant.id)
 
       console.log("finished run:", JSON.stringify({ run: run.status }))
 
-      const messages = await getAssistantMessages(thread.id)
+      const messages = await getAssistantMessages(payload.threadId)
 
       const latestAssistantMessage = JSON.parse(
         (messages.data.shift()?.content.shift() as MessageContentText)?.text
@@ -148,7 +161,12 @@ async function start() {
 
       channel.sendToQueue(
         latestAssistantMessage.queue,
-        Buffer.from(JSON.stringify(latestAssistantMessage))
+        Buffer.from(
+          JSON.stringify({
+            ...latestAssistantMessage,
+            threadId: payload.threadId,
+          })
+        )
       )
 
       console.log(

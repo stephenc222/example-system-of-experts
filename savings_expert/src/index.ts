@@ -8,13 +8,13 @@ const RABBITMQ_PASSWORD = process.env.RABBITMQ_PASSWORD || "guest"
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in the environment variables
 const RABBITMQ_URL = `amqp://${RABBITMQ_USERNAME}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}`
 const CATEGORIZED_EXPENSE_QUEUE = "categorized_expense_queue"
-// const SAVINGS_ADVICE_QUEUE = "savings_advice_queue" // Queue for publishing savings advice
-const CLIENT_QUEUE = "client_queue"
+const MANAGER_QUEUE = "manager_queue"
+const CLIENT_QUEUE = "client_queue" // queue for sending back to the client
 
 const ASSISTANT_NAME = "SavingsExpert"
 const ASSISTANT_INSTRUCTIONS = `**You are the 'SavingsExpert':** A virtual assistant specialized in analyzing categorized personal financial data to provide insights and suggestions for savings. Your task is to offer advice on how to save money based on the spending patterns evident from the categorized expenses.
 
-**Instructions for Providing Savings Advice:**
+**Instructions for Providing Savings Advice and Queue Routing:**
 
 1. **Understanding Spending Patterns:**
    - Review the categorized expense data to identify spending trends and areas where the user may be able to save money.
@@ -22,18 +22,26 @@ const ASSISTANT_INSTRUCTIONS = `**You are the 'SavingsExpert':** A virtual assis
 2. **Advice Logic:**
    - Provide concrete suggestions for savings based on the expense categories. For example, suggest budget adjustments, recommend cheaper alternatives, or highlight opportunities for cost-cutting.
 
-3. **Output Format:**
-   - Your response should be a JSON object with key-value pairs that include the original expense description, the category, and your savings advice.
+3. **Routing Logic:**
+   - Determine the appropriate RabbitMQ queue based on the nature of the advice:
+     - Use 'client_queue' to send the savings advice directly back to the client.
+     - Use 'manager_queue' if the conversation requires input from or notification to other services for further processing or expert analysis.
+
+4. **Output Format:**
+   - Your responses should be in the form of a JSON object that includes key-value pairs with the original expense description, the category, and your savings advice. Additionally, include a 'queue' field indicating the appropriate RabbitMQ queue for the response.
 
 **Example JSON Response:**
 
-For a list of expenses categorized as "Entertainment", your response should be a raw JSON string (no markdown syntax, just raw text that could be parsed directly as JSON) like this:
+For a list of expenses categorized as "Entertainment", your response routed to the 'client_queue' should be a raw JSON string formatted as follows:
 
 {
   "description": "Monthly subscriptions",
   "category": "Entertainment",
-  "message": "Consider evaluating whether all subscriptions are necessary, or look for bundled options that could reduce the overall monthly cost."
+  "message": "Consider evaluating whether all subscriptions are necessary, or look for bundled options that could reduce the overall monthly cost.",
+  "queue": "client_queue"
 }
+
+**Note:** The JSON response should be a raw string without markdown syntax (do not include "\`\`\`json" nor \`\`\`), ready for direct parsing as JSON.
 `
 
 // The rest of your TypeScript code setting up the OpenAI and RabbitMQ connections would remain unchanged.
@@ -54,14 +62,18 @@ async function createSavingsExpertAssistant() {
 
 async function createThread() {
   // ... Create a thread for a new conversation ...
-  return openai.beta.threads.create()
+  return (await openai.beta.threads.create()).id
 }
 
-async function addMessageToThread(threadId: string, content: string) {
+async function addMessageToThread(message: {
+  threadId: string
+  [key: string]: string | number
+}) {
   // ... Add a message to the thread ...
+  const { threadId, ...content } = message
   return openai.beta.threads.messages.create(threadId, {
     role: "user",
-    content,
+    content: JSON.stringify(content),
   })
 }
 
@@ -110,29 +122,39 @@ async function start() {
   const channel = await conn.createChannel()
   await channel.assertQueue(CATEGORIZED_EXPENSE_QUEUE, { durable: false })
   await channel.assertQueue(CLIENT_QUEUE, { durable: false })
+  await channel.assertQueue(MANAGER_QUEUE, { durable: false })
   const assistant = await createSavingsExpertAssistant()
   console.log("created savings_expert")
 
   channel.consume(CATEGORIZED_EXPENSE_QUEUE, async (msg) => {
     if (msg !== null) {
-      const expense = JSON.parse(msg.content.toString())
+      const payload = JSON.parse(msg.content.toString())
+      // TODO: consider Zod validation of the payload, through a custom validator
       // TODO: accepting on the message payload a "threadId", to be able to "continue a conversation"
-      const thread = await createThread()
+      if (!payload.threadId) {
+        payload.threadId = await createThread()
+      }
 
-      await addMessageToThread(thread.id, expense.description)
-      const run = await runAssistant(thread.id, assistant.id)
+      await addMessageToThread(payload)
+      const run = await runAssistant(payload.threadId, assistant.id)
 
       console.log("finished run:", JSON.stringify({ run: run.status }))
 
-      const messages = await getAssistantMessages(thread.id)
+      const messages = await getAssistantMessages(payload.threadId)
 
-      const latestAssistantMessage = (
-        messages.data.shift()?.content.shift() as MessageContentText
-      )?.text
+      const latestAssistantMessage = JSON.parse(
+        (messages.data.shift()?.content.shift() as MessageContentText)?.text
+          .value
+      )
 
       channel.sendToQueue(
-        CLIENT_QUEUE,
-        Buffer.from(JSON.stringify(latestAssistantMessage.value))
+        latestAssistantMessage.queue,
+        Buffer.from(
+          JSON.stringify({
+            ...latestAssistantMessage,
+            threadId: payload.threadId,
+          })
+        )
       )
 
       console.log(

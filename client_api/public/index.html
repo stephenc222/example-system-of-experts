@@ -46,8 +46,10 @@
 
       // Listen for messages from the server
       socket.addEventListener("message", (event) => {
-        const data = JSON.parse(event.data)
-        const payload = JSON.parse(data)
+        const payload = JSON.parse(event.data)
+        if (payload.threadId) {
+          sessionStorage.setItem("threadId", payload.threadId)
+        }
         displayMessage(payload.message, "received")
       })
 
@@ -60,10 +62,16 @@
           const message = messageBox.value
           messageBox.value = "" // Clear the input field
 
-          displayMessage(message,  "sent")
+          displayMessage(message, "sent")
 
           // Send the message through the WebSocket
-          socket.send(JSON.stringify({ type: "message", content: message }))
+          socket.send(
+            JSON.stringify({
+              type: "message",
+              message,
+              threadId: sessionStorage.getItem("threadId") || undefined,
+            })
+          )
         })
 
       // Display messages on the page

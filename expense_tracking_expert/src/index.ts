@@ -9,29 +9,47 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in 
 const RABBITMQ_URL = `amqp://${RABBITMQ_USERNAME}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}`
 const EXPENSE_QUEUE = "expense_queue"
 const CATEGORIZED_EXPENSE_QUEUE = "categorized_expense_queue"
+const CHAT_QUEUE = "chat_queue" // Queue for publishing savings advice
 
 const ASSISTANT_NAME = "ExpenseTrackingExpert"
-const ASSISTANT_INSTRUCTIONS = `**You are the 'ExpenseTrackingExpert':** A virtual assistant specialized in managing and categorizing personal financial data. Your task is to analyze expenses and output the categorization in JSON format.
+const ASSISTANT_INSTRUCTIONS = `**You are the 'ExpenseTrackingExpert':** A virtual assistant specialized in managing and categorizing personal financial data. Your task is to analyze expenses, categorize them, and output the categorization in JSON format. Additionally, you must decide the appropriate RabbitMQ queue for the response based on the categorization and clarity of the expense.
 
-**Instructions for Categorizing Expenses:**
+**Instructions for Categorizing Expenses and Routing Decisions:**
 
 1. **Understanding Expenses:**
    - Analyze the description and details of each expense entry. Identify key phrases or words that indicate the nature of the expense (e.g., "coffee at Starbucks", "electricity bill", "gym membership").
 
 2. **Categorization Logic:**
-   - Assign a category to each expense based on its description. Use standard expense categories such as 'Food & Dining', 'Utilities', 'Health & Fitness', 'Groceries', 'Transportation', 'Entertainment', and 'Miscellaneous'.
+   - Assign a category to each expense based on its description using standard expense categories such as 'Food & Dining', 'Utilities', 'Health & Fitness', 'Groceries', 'Transportation', 'Entertainment', and 'Miscellaneous'.
 
-3. **Output Format:**
-   - Your response should be a JSON object with two key-value pairs: "description" echoing the original expense description and "category" with the category you have assigned.
+3. **Routing Logic:**
+   - Determine the appropriate RabbitMQ queue based on the category and clarity of the description:
+     - Use 'expense_queue' for uncategorized expenses or when no clear category is identifiable.
+     - Use 'categorized_expense_queue' for expenses that fit clearly within standard categories.
+     - Use 'chat_queue' if the expense description is ambiguous, or unclear.
+
+4. **Output Format:**
+   - Your response should be a JSON object with three key-value pairs: "message" echoing the original expense description, "category" with the category you have assigned (or "Uncategorized" if not clear), and "queue" indicating the RabbitMQ queue to which the response should be routed.
 
 **Example JSON Response:**
 
-For an expense description "Paid Netflix subscription", and your response should only be a raw JSON string (no json markdown syntax, just raw text that could be parsed directly as JSON):
+For an expense description "Paid Netflix subscription", your response should be a raw JSON string formatted as follows:
 
 {
-  "description": "Paid Netflix subscription",
-  "category": "Entertainment"
+  "message": "Paid Netflix subscription",
+  "category": "Entertainment",
+  "queue": "categorized_expense_queue"
 }
+
+For an unclear expense description such as "Monthly charge", where the category is not immediately apparent, your response should route to the 'chat_queue':
+
+{
+  "message": "Monthly charge",
+  "category": "Uncategorized",
+  "queue": "chat_queue"
+}
+
+**Note:** The JSON response should be a raw string without markdown syntax (do not include "\`\`\`json" nor \`\`\`), ready for direct parsing as JSON.
 `
 
 const openai = new OpenAI({
@@ -50,14 +68,18 @@ async function createExpenseCategorizationAssistant() {
 
 async function createThread() {
   // ... Create a thread for a new conversation ...
-  return openai.beta.threads.create()
+  return (await openai.beta.threads.create()).id
 }
 
-async function addMessageToThread(threadId: string, content: string) {
+async function addMessageToThread(message: {
+  threadId: string
+  [key: string]: string | number
+}) {
   // ... Add a message to the thread ...
+  const { threadId, ...content } = message
   return openai.beta.threads.messages.create(threadId, {
     role: "user",
-    content,
+    content: JSON.stringify(content),
   })
 }
 
@@ -106,6 +128,7 @@ async function start() {
   const channel = await conn.createChannel()
   await channel.assertQueue(EXPENSE_QUEUE, { durable: false })
   await channel.assertQueue(CATEGORIZED_EXPENSE_QUEUE, { durable: false })
+  await channel.assertQueue(CHAT_QUEUE, { durable: false })
   const assistant = await createExpenseCategorizationAssistant()
   console.log("created expense_tracking_expert")
 
@@ -113,27 +136,35 @@ async function start() {
     if (msg !== null) {
       const payload = JSON.parse(msg.content.toString())
       // TODO: accepting on the message payload a "threadId", to be able to "continue a conversation"
-      const thread = await createThread()
+      if (!payload.threadId) {
+        payload.threadId = await createThread()
+      }
 
-      await addMessageToThread(thread.id, payload.message)
-      const run = await runAssistant(thread.id, assistant.id)
+      await addMessageToThread(payload)
+      const run = await runAssistant(payload.threadId, assistant.id)
 
       console.log("finished run:", JSON.stringify({ run: run.status }))
 
-      const messages = await getAssistantMessages(thread.id)
+      const messages = await getAssistantMessages(payload.threadId)
 
-      const latestAssistantMessage = (
-        messages.data.shift()?.content.shift() as MessageContentText
-      )?.text
-
-      const categorizedExpense = JSON.parse(latestAssistantMessage.value)
-
-      channel.sendToQueue(
-        CATEGORIZED_EXPENSE_QUEUE,
-        Buffer.from(JSON.stringify(categorizedExpense))
+      const latestAssistantMessage = JSON.parse(
+        (messages.data.shift()?.content.shift() as MessageContentText)?.text
+          .value
       )
 
-      console.log(`Categorized expense: ${JSON.stringify(categorizedExpense)}`)
+      channel.sendToQueue(
+        latestAssistantMessage.queue,
+        Buffer.from(
+          JSON.stringify({
+            ...latestAssistantMessage,
+            threadId: payload.threadId,
+          })
+        )
+      )
+
+      console.log(
+        `Categorized expense: ${JSON.stringify(latestAssistantMessage)}`
+      )
       channel.ack(msg)
     }
   })
