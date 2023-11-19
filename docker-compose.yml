@@ -14,7 +14,11 @@ services:
       NAME: "rabbitmq"
 
   client_api:
-    build: ./client_api
+    build:
+      context: . # The context is the root of the monorepo
+      dockerfile: Dockerfile
+      args:
+        PACKAGE_NAME: client_api
     environment:
       RABBITMQ_HOST: ${RABBITMQ_HOST}
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
@@ -26,7 +30,11 @@ services:
     ports:
       - "3000:3000"
   chat_expert:
-    build: ./chat_expert
+    build:
+      context: . # The context is the root of the monorepo
+      dockerfile: Dockerfile
+      args:
+        PACKAGE_NAME: chat_expert
     environment:
       RABBITMQ_HOST: ${RABBITMQ_HOST}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -37,7 +45,11 @@ services:
     labels:
       NAME: "chat_expert"
   manager_expert:
-    build: ./manager_expert
+    build:
+      context: . # The context is the root of the monorepo
+      dockerfile: Dockerfile
+      args:
+        PACKAGE_NAME: manager_expert
     environment:
       RABBITMQ_HOST: ${RABBITMQ_HOST}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -48,7 +60,11 @@ services:
     labels:
       NAME: "manager_expert"
   expense_tracking_expert:
-    build: ./expense_tracking_expert
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PACKAGE_NAME: expense_tracking_expert
     environment:
       RABBITMQ_HOST: ${RABBITMQ_HOST}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -60,7 +76,11 @@ services:
       NAME: "expense_tracking_expert"
 
   savings_expert:
-    build: ./savings_expert
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PACKAGE_NAME: savings_expert
     environment:
       RABBITMQ_HOST: ${RABBITMQ_HOST}
       OPENAI_API_KEY: ${OPENAI_API_KEY}

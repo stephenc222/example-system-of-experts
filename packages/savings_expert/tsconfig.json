@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".", // This must be set if using "paths"
+    "paths": {
+      "@shared": ["../shared/dist"] // Assuming that shared code is compiled to the dist directory
+    }
+    // Consumer-specific compiler options go here
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../shared" }
+  ]
+}
