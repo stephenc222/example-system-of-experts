@@ -5,7 +5,9 @@ export default class Expert {
   private assistantId: string
   private aiService: AIService
   private logger: Logger
+  private expertName: string
   private constructor(
+    name: string,
     assistantId: string,
     aiService: AIService,
     logger: Logger
@@ -13,6 +15,7 @@ export default class Expert {
     this.assistantId = assistantId
     this.aiService = aiService
     this.logger = logger
+    this.expertName = name
   }
 
   static async create(
@@ -23,7 +26,7 @@ export default class Expert {
     const assistantId = await aiService.createAssistant(name, instructions)
     const logger = new Logger(name)
 
-    return new Expert(assistantId, aiService, logger)
+    return new Expert(name, assistantId, aiService, logger)
   }
 
   // process the payload
@@ -36,7 +39,11 @@ export default class Expert {
     // Add message to thread
     await this.aiService.addMessageToAssistant(threadId, content)
     await this.aiService.run(threadId, this.assistantId)
-    const latestResponse = await this.aiService.getAssistantResponse(threadId)
+    const latestResponse = {
+      expertName: this.expertName,
+      ...(await this.aiService.getAssistantResponse(threadId)),
+    }
+
     this.logger.info(JSON.stringify(latestResponse))
     return latestResponse
   }

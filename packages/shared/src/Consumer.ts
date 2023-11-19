@@ -1,5 +1,6 @@
 import * as amqp from "amqplib"
 import { MessageProcessor } from "./types"
+import { sleep } from "./util"
 
 const RABBITMQ_HOST = process.env.RABBITMQ_HOST || "rabbitmq"
 const RABBITMQ_USERNAME = process.env.RABBITMQ_USERNAME || "guest"
@@ -17,19 +18,19 @@ export default class Consumer {
   private async connectWithRetry(
     rabbitMQUrl: string,
     retries: number = 5,
-    interval: number = 15000
+    interval: number = 20000
   ): Promise<amqp.Connection> {
     let lastError: unknown
 
     for (let i = 0; i < retries; i++) {
       try {
+        await sleep(interval)
         return await amqp.connect(rabbitMQUrl)
       } catch (error) {
         lastError = error
         console.error(
           `Failed to connect to RabbitMQ (attempt ${i + 1}/${retries})`
         )
-        await new Promise((resolve) => setTimeout(resolve, interval))
       }
     }
 

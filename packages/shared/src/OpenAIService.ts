@@ -1,15 +1,12 @@
 // OpenAIService.ts
 import { OpenAI } from "openai"
 import { AIService } from "./types"
+import { sleep } from "./util"
 import { MessageContentText } from "openai/resources/beta/threads/messages/messages"
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY // Set your OpenAI API key in the environment variables
 
 const MODEL = process.env.MODEL ?? "gpt-4-1106-preview"
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,

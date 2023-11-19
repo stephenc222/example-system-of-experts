@@ -16,10 +16,13 @@
         border-bottom: 1px solid #eee;
       }
       .sent {
-        color: blue;
+        color: #343f4a;
       }
-      .received {
-        color: green;
+      .received-ChatExpert {
+        color: #035388;
+      }
+      .received-SavingsExpert {
+        color: #0c6b58;
       }
     </style>
   </head>
@@ -50,7 +53,11 @@
         if (payload.threadId) {
           sessionStorage.setItem("threadId", payload.threadId)
         }
-        displayMessage(payload.message, "received")
+        displayMessage(
+          payload.expertName,
+          payload.message,
+          `received-${payload.expertName}`
+        )
       })
 
       // Submit form to send a message
@@ -62,7 +69,7 @@
           const message = messageBox.value
           messageBox.value = "" // Clear the input field
 
-          displayMessage(message, "sent")
+          displayMessage("user", message, "sent")
 
           // Send the message through the WebSocket
           socket.send(
@@ -75,10 +82,13 @@
         })
 
       // Display messages on the page
-      function displayMessage(message, className) {
+      function displayMessage(expertName, message, className) {
         const messageElement = document.createElement("div")
         messageElement.classList.add("message", className)
-        messageElement.textContent = message
+        messageElement.textContent =
+          expertName && expertName !== "user"
+            ? `[${expertName}] ${message}`
+            : message
         messagesElement.appendChild(messageElement)
         messagesElement.scrollTop = messagesElement.scrollHeight // Auto scroll to the bottom
       }
