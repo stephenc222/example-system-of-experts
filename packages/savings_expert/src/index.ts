@@ -1,6 +1,6 @@
 import "module-alias/register"
 
-import { Consumer, Expert, OpenAIService } from "@shared"
+import { Consumer, Expert, CohereAIService } from "@shared"
 
 const QUEUE = process.env.QUEUE ?? "categorized_expense_queue"
 
@@ -40,7 +40,7 @@ For a list of expenses categorized as "Entertainment", your response routed to t
 async function start(queueName: string) {
   // this service, as long as it meets the IAISservice interface, can be swapped
   // for another service managing another LLM
-  const aiService = new OpenAIService()
+  const aiService = new CohereAIService()
   const expert = await Expert.create(
     ASSISTANT_NAME,
     ASSISTANT_INSTRUCTIONS,

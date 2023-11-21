@@ -54,9 +54,9 @@
           sessionStorage.setItem("threadId", payload.threadId)
         }
         displayMessage(
-          payload.expertName,
+          payload.name,
           payload.message,
-          `received-${payload.expertName}`
+          `received-${payload.name}`
         )
       })
 
@@ -74,7 +74,7 @@
           // Send the message through the WebSocket
           socket.send(
             JSON.stringify({
-              type: "message",
+              sender: "user",
               message,
               threadId: sessionStorage.getItem("threadId") || undefined,
             })
@@ -82,13 +82,11 @@
         })
 
       // Display messages on the page
-      function displayMessage(expertName, message, className) {
+      function displayMessage(name, message, className) {
         const messageElement = document.createElement("div")
         messageElement.classList.add("message", className)
         messageElement.textContent =
-          expertName && expertName !== "user"
-            ? `[${expertName}] ${message}`
-            : message
+          name && name !== "user" ? `[${name}] ${message}` : message
         messagesElement.appendChild(messageElement)
         messagesElement.scrollTop = messagesElement.scrollHeight // Auto scroll to the bottom
       }

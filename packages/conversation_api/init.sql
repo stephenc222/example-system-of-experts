@@ -1,0 +1,26 @@
+-- Conversation Table
+CREATE TABLE IF NOT EXISTS conversations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Assistant Table
+CREATE TABLE IF NOT EXISTS assistants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+  instructions TEXT NOT NULL,
+  assistant_name TEXT NOT NULL
+);
+
+-- Message Table
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);

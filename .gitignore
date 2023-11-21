@@ -2,3 +2,5 @@
 dist
 node_modules
 rabbitmq-data
+conversation.db
+__pycache__
