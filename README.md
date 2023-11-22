@@ -1,6 +1,8 @@
 # Example System of Experts
 
-This example project demonstrates how AI Assistants, running in separate docker containers, can make decisions on how to communicate both with each other and end users, implemented for a simple "Personal Financial Assistant" system of experts
+This example project demonstrates how AI Assistants, running in separate docker containers, can make decisions on how to communicate both with each other and end users, implemented for a simple "Personal Financial Assistant" system of experts.
+
+For a detailed overview and explanation of this system of experts, check out my [companion blog post](https://stephencollins.tech/posts/how-to-build-a-system-of-experts-with-llms).
 
 ## Prerequisites
 
